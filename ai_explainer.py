@@ -195,6 +195,99 @@ def build_explanation(project: ProjectInput,
     return {"plain": plain, "technical": technical, "narrative": narrative}
 
 
+def build_executive_briefing(project: ProjectInput,
+                             macro: Optional[MacroContext],
+                             result: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the executive briefing used by BOTH the report and the audio.
+
+    Everything here is derived from the SAME computed `result` (one shared
+    cash-flow table) so the audio and the PDF always agree. Returns:
+
+      executive_summary : short board-ready paragraph
+      briefing          : first-person spoken sentences (TTS friendly)
+      monitoring_points : list of concrete things management should watch
+      risk_headline     : one-line risk status with the geometric classifier
+      status            : {shape, level, color, reasons}
+    """
+    macro = macro or MacroContext()
+    npv = float(result.get("npv", 0.0))
+    irr = float(result.get("irr", 0.0))
+    mirr = float(result.get("mirr", 0.0))
+    wacc = float(result.get("wacc", 0.0))
+    pi = float(result.get("pi", 0.0))
+    payback = float(result.get("payback", float("inf")))
+    capex = float(result.get("expected_capex", project.initial_investment))
+    eaa = float(result.get("eaa", 0.0))
+    inf = float(result.get("inflation_used_pct", macro.inflation_pct()))
+    decision = str(result.get("decision", "N/A"))
+    life = int(project.project_life)
+
+    try:
+        from core.risk_engine import classify_status
+        status = classify_status(result)
+    except Exception:
+        status = {"shape": "HEXAGON", "level": "PROJECT STABLE",
+                  "color": "#33b27c", "emoji": "", "reasons": ""}
+    status_text = "%s (%s)" % (status.get("shape"), status.get("level"))
+
+    verdict = ("generates value" if npv >= 0 else "currently destroys value")
+    npv_word = "positive" if npv >= 0 else "negative"
+    pb = "{:.1f} years".format(payback) if payback != float("inf") else "beyond the project life"
+
+    # ------------------------------------------------------ spoken sentences
+    briefing = (
+        "This is the executive briefing for the %s project in the %s sector. "
+        "The model evaluated a %s-year operating life with an expected capital "
+        "investment of %s US dollars, including escalation and contingency. "
+        "The project %s: net present value is %s US dollars, the internal rate "
+        "of return is %s, and the modified internal rate of return is %s, "
+        "against a %s weighted average cost of capital. The profitability index "
+        "is %s, and payback is reached in %s. The management decision is %s. "
+        "The model %s current risk status: %s. Under stress testing, inflation, "
+        "exchange rate, interest rate and material price shocks are the main "
+        "forces that move these numbers. Management should monitor inflation, "
+        "the Zimbabwe dollar exchange rate, interest rates and material prices, "
+        "together with construction schedule and cost-overrun probability, "
+        "before committing final funding."
+        % (project.project_name, project.sector, life, _usd(capex),
+           verdict, _usd(npv), _rate(irr), _rate(mirr), _rate(wacc),
+           "{:.2f}".format(pi), pb, decision,
+           ("holds" if npv >= 0 else "warns"), status_text)
+    )
+
+    monitoring_points = [
+        "Inflation: the model escalated costs at %s; re-test whenever the rate moves more than five points." % _pct(inf),
+        "Exchange rate: %s of capital investment is hard-currency imported equipment, so ZiG/USD moves directly change project cost." % _pct(project.imported_equipment_pct),
+        "Interest rates: a WACC of %s means rate changes feed straight into NPV and IRR." % _rate(wacc),
+        "Material prices and procurement: contract type %s and %d days of procurement delay feed the cost-overrun and delay estimates." % (project.contractor_type, int(project.procurement_delay_days)),
+        "Cash flow: NPV %s, PI %s, payback %s, EAA %s - watch revenue versus operating-cost growth annually." % (_usd(npv), "{:.2f}".format(pi), pb, _usd(eaa)),
+        "Risk status: %s. Re-run the stress lab before any final investment decision." % status_text,
+    ]
+
+    executive_summary = (
+        "The %s project is evaluated at %s NPV (%s), %s IRR against a %s WACC, "
+        "%s PI, %s payback, and %s EAA under Zimbabwe's current macro "
+        "environment (%s inflation used). %s The dominant risks are "
+        "inflation, exchange-rate and interest-rate exposure. %s"
+        % (project.project_name, _usd(npv), npv_word, _rate(irr), _rate(wacc),
+           "{:.2f}".format(pi), pb, _usd(eaa), _pct(inf),
+           _first_letter(decision + "."), str(status.get("reasons", "")))
+    )
+
+    return {
+        "executive_summary": executive_summary,
+        "briefing": briefing,
+        "monitoring_points": monitoring_points,
+        "risk_headline": "%s - %s" % (status.get("shape"), status.get("level")),
+        "status": status,
+        "field_map": {
+            "npv": npv, "irr": irr, "mirr": mirr, "wacc": wacc, "pi": pi,
+            "capex": capex, "payback": payback, "eaa": eaa, "inflation": inf,
+            "life_years": life, "decision": decision,
+        },
+    }
+
+
 def _main_driver(project: ProjectInput, result: Dict[str, Any]) -> str:
     """Cheap deterministic guess at the dominant driver using known structure."""
     try:

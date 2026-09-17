@@ -421,7 +421,8 @@ def test_macro_context_methods():
 # GZU demo project (SYNTHETIC/DEMO DATA)
 # ===========================================================================
 def _load_gzu_demo() -> dm.ProjectInput:
-    projects = app._load_demo_projects()
+    from app import _load_demo_projects
+    projects = _load_demo_projects()
     for p in projects:
         if p.project_id == "GZU-HUB-001":
             return p
@@ -432,9 +433,11 @@ def test_gzu_innovation_hub_demo():
     p = _load_gzu_demo()
     if p.project_id != "GZU-HUB-001":
         return False
-    if p.project_name != "GZU Innovation Hub â€” Masvingo Campus":
+    if p.project_name != "GZU Innovation Hub - Mashava Campus":
         return False
     if p.sector != "education" or p.province != "Masvingo":
+        return False
+    if "Mashava Campus" not in (p.project_location or ""):
         return False
     r = project_cash_flows(p, fixture_macro())
     for key in ("npv", "mirr", "payback", "discounted_payback", "pi", "eaa"):
@@ -447,6 +450,130 @@ def test_gzu_innovation_hub_demo():
     if not np.isfinite(float(r["expected_capex"])):
         return False
     return np.isfinite(float(r["arr"]))
+
+
+# ===========================================================================
+# Executive briefing (report + audio share the same results)
+# ===========================================================================
+def test_executive_briefing():
+    p = fixture_project()
+    m = fixture_macro()
+    r = fixture_result()
+    b = ai.build_executive_briefing(p, m, r)
+    for key in ("executive_summary", "briefing", "monitoring_points",
+                "risk_headline", "status", "field_map"):
+        if key not in b:
+            return False
+    if p.project_name not in b["briefing"]:
+        return False
+    if "$" not in "{:,.0f}".format(r["npv"]) and not any(ch.isdigit() for ch in b["briefing"]):
+        return False
+    if not isinstance(b["monitoring_points"], list) or len(b["monitoring_points"]) < 5:
+        return False
+    f = b["field_map"]
+    if f["npv"] != r["npv"] or f["irr"] != r["irr"]:
+        return False
+    return abs(f["wacc"] - r["wacc"]) < 1e-9
+
+
+# ===========================================================================
+# File upload (Option B) parsing + validation
+# ===========================================================================
+def test_upload_parsing():
+    good = pd.DataFrame([{
+        "project_id": "UP1", "project_name": "Uploaded Demo",
+        "sector": "education", "initial_investment": 15000000,
+        "project_life": 15, "annual_revenue": 2500000,
+        "operating_costs": 900000, "submitter_email": "submit@example.com",
+    }])
+    projects, errors = dm.projects_from_upload(good)
+    if len(projects) != 1 or errors:
+        return False
+    if projects[0].initial_investment != 15000000:
+        return False
+    if projects[0].submitter_email != "submit@example.com":
+        return False
+
+    # missing investment column
+    missing = pd.DataFrame([{"project_name": "X", "project_life": 5}])
+    p2, e2 = dm.projects_from_upload(missing)
+    if p2:
+        return False
+    if not any("Initial investment is missing" in e for e in e2):
+        return False
+
+    # invalid email
+    bad_mail = pd.DataFrame([{
+        "initial_investment": 1000000, "project_life": 5,
+        "submitter_email": "not-an-email@", "project_name": "Y",
+    }])
+    p3, e3 = dm.projects_from_upload(bad_mail)
+    if p3:
+        return False
+    if not any("Submitter email is invalid" in e for e in e3):
+        return False
+
+    # zero / negative duration
+    bad_life = pd.DataFrame([{
+        "initial_investment": 1000000, "project_life": 0, "project_name": "Z",
+    }])
+    p4, e4 = dm.projects_from_upload(bad_life)
+    if p4:
+        return False
+    return any("greater than zero" in e for e in e4)
+
+
+# ===========================================================================
+# Vision 2030 alignment engine
+# ===========================================================================
+def test_vision_2030_alignment():
+    import core.vision_2030 as v
+    for sector, alias in (("education", "education"), ("solar", "energy"),
+                          ("roads", "roads"), ("agriculture", "agriculture")):
+        if v.normalize_sector(sector) != alias:
+            return False
+    p = fixture_project()
+    al = v.project_alignment(p)
+    if "score" not in al or not (5 <= al["score"] <= 100):
+        return False
+    if al["sector"] != "roads":
+        return False
+    if not al["goals"] or al["goals"][0]["code"] != "NDG6":
+        return False
+    for g in al["goals"]:
+        if not v.ndg_name(g["code"]):
+            return False
+    if "VISION 2030 ALIGNMENT" not in v.alignment_markdown(al):
+        return False
+    return "<div" in v.alignment_html(al)
+
+
+def test_vision_2030_edu_via_demo():
+    import core.vision_2030 as v
+    p = _load_gzu_demo()
+    if p.project_id != "GZU-HUB-001":
+        return False
+    al = v.project_alignment(p)
+    if al["sector"] != "education":
+        return False
+    if al["goals"][0]["code"] != "NDG4":
+        return False
+    return al["score"] >= 70
+
+
+def test_report_vision_2030_section():
+    import core.report_builder as rb
+    from core.vision_2030 import project_alignment
+    p = fixture_project()
+    m = fixture_macro()
+    r = fixture_result()
+    txt = rb.generate_text_report(p, m, r,
+                                  sections=["Vision 2030 Alignment", "Final Findings"])
+    if "VISION 2030 ALIGNMENT" not in txt:
+        return False
+    if "Estimated alignment:" not in txt:
+        return False
+    return "not official government endorsements" in txt
 
 
 # ===========================================================================

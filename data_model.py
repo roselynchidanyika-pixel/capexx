@@ -6,7 +6,7 @@ dataclasses so every engine consumes ONE consistent project definition.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 
 @dataclass
@@ -109,3 +109,134 @@ class PortfolioSettings:
 
 def project_to_dict(p: ProjectInput) -> Dict[str, Any]:
     return asdict(p)
+
+
+# ---------------------------------------------------------------------------
+# File upload (Option B) parsing + validation
+# ---------------------------------------------------------------------------
+
+_NUMERIC_FIELDS = {
+    "initial_investment", "imported_equipment_pct", "contingency_pct",
+    "salvage_value_pct", "construction_months", "project_life",
+    "annual_revenue", "revenue_growth_pct", "operating_costs",
+    "operating_cost_growth_pct", "working_capital_pct", "terminal_growth_pct",
+    "debt_ratio_pct", "debt_interest_pct", "equity_cost_pct", "wacc_pct",
+    "reinvestment_rate_pct", "tax_rate_pct", "debt_tenor_years",
+    "complexity_score", "design_completeness", "procurement_delay_days",
+    "num_change_orders",
+}
+
+_STRING_FIELDS = {
+    "project_id", "project_name", "sector", "project_type", "currency",
+    "contractor_type", "funding_source", "procurement_method", "province",
+    "submitter_email", "expected_completion", "project_location",
+    "contractor_name", "notes", "remarks",
+}
+
+_COLUMN_ALIASES = {
+    "projectname": "project_name",
+    "name": "project_name",
+    "projectid": "project_id",
+    "sector": "sector",
+    "projecttype": "project_type",
+    "initialinvestment": "initial_investment",
+    "initialinvestmentusd": "initial_investment",
+    "capex": "initial_investment",
+    "projectlife": "project_life",
+    "projectduration": "project_life",
+    "annualrevenue": "annual_revenue",
+    "revenue": "annual_revenue",
+    "operatingcosts": "operating_costs",
+    "email": "submitter_email",
+    "submitteremail": "submitter_email",
+    "location": "project_location",
+}
+
+
+def _norm_col(name: Any) -> str:
+    """Normalise a spreadsheet column to a field name."""
+    s = str(name or "").strip().lower()
+    s = "".join(ch if ch.isalnum() else "_" for ch in s)
+    s = s.strip("_")
+    for k, v in _COLUMN_ALIASES.items():
+        if s in (k, k.replace("_", "")):
+            return v
+    return s
+
+
+def projects_from_upload(df: Any) -> Tuple[List[ProjectInput], List[str]]:
+    """Parse uploaded CSV/Excel rows into `ProjectInput` records.
+
+    Returns (projects, errors). Rows that fail validation are skipped and a
+    readable error is appended. Never throws; caller renders `errors` in the UI.
+    """
+    errors: List[str] = []
+    projects: List[ProjectInput] = []
+
+    if df is None or getattr(df, "shape", (0, 0))[0] < 1:
+        return [], ["Uploaded file has no data rows."]
+
+    cols = {_norm_col(c): str(c) for c in df.columns}
+    if "initial_investment" not in cols:
+        errors.append("Initial investment is missing (no 'initial_investment' "
+                      "or 'capex' column found).")
+
+    if "submitter_email" in cols:
+        bad = df[cols["submitter_email"]].dropna().astype(str)
+        invalid = [v for v in bad if "@" not in v or "." not in v.split("@")[-1]]
+        if invalid:
+            errors.append("Submitter email is invalid in %d row(s)." % len(invalid))
+
+    for idx, row in df.iterrows():
+        values: Dict[str, Any] = {}
+        for field in _NUMERIC_FIELDS:
+            if field not in cols:
+                continue
+            v = row.get(cols[field])
+            if v is None or (isinstance(v, float) and pd_isna(v)):
+                continue
+            try:
+                values[field] = float(v)
+            except (TypeError, ValueError):
+                errors.append("Invalid numeric value for '%s' in row %d." % (field, idx + 2))
+        for field in _STRING_FIELDS:
+            if field not in cols:
+                continue
+            v = row.get(cols[field])
+            if v is None or (isinstance(v, float) and pd_isna(v)):
+                continue
+            values[field] = str(v).strip()
+
+        if "initial_investment" not in values or values.get("initial_investment", 0) is None:
+            errors.append("Initial investment is missing in row %d." % (idx + 2))
+            continue
+        if float(values.get("initial_investment", 0) or 0) <= 0:
+            errors.append("Initial investment must be greater than zero in row %d." % (idx + 2))
+            continue
+        if "project_life" in values and float(values["project_life"] or 0) <= 0:
+            errors.append("Project duration must be greater than zero in row %d." % (idx + 2))
+            continue
+
+        email = values.get("submitter_email", "")
+        if email:
+            if "@" not in email or "." not in email.split("@")[-1]:
+                errors.append("Submitter email is invalid in row %d." % (idx + 2))
+                continue
+
+        defaults = asdict(ProjectInput())
+        defaults.update(values)
+        defaults.pop("notes_flag", None)
+        try:
+            projects.append(ProjectInput(**defaults))
+        except Exception as e:  # noqa: BLE001
+            errors.append("Could not build project from row %d: %s" % (idx + 2, e))
+
+    return projects, errors
+
+
+def pd_isna(v: Any) -> bool:
+    try:
+        import math
+        return bool(math.isnan(float(v)))
+    except (TypeError, ValueError):
+        return False

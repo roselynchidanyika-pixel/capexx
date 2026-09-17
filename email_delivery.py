@@ -85,9 +85,9 @@ def send_report_email(
 
     try:
         msg = MIMEMultipart("mixed")
-        msg["From"] = formataddr(("CapEx AI Agent", user))
+        msg["From"] = formataddr(("Vision 2030 CapEx AI Agent", user))
         msg["To"] = recipient
-        msg["Subject"] = subject or "CapEx AI Agent - Management Report"
+        msg["Subject"] = subject or "Vision 2030 CapEx AI Agent - Management Report"
 
         msg.attach(MIMEText(body or "", "plain", "utf-8"))
 

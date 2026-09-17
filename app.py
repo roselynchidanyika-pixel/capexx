@@ -1,8 +1,10 @@
-"""CapEx AI Agent - Zimbabwe Capital Projects Finance Intelligence Platform.
+﻿"""CapEx AI Agent - Vision 2030 Zimbabwe Capital Projects Finance Intelligence.
 
 Single Streamlit entry point. Live-reactant: any input or macro change
 re-runs ONE shared cash-flow table so every metric and every chart agrees.
 No secrets are hard-coded; SMTP credentials come from env / Streamlit secrets.
+Project alignment to Vision 2030 / National Development Goals is inferential
+AI judgement for decision support, never an official endorsement.
 """
 from __future__ import annotations
 
@@ -19,7 +21,8 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 # Core engines
 # ---------------------------------------------------------------------------
-from core.data_model import PortfolioSettings, MacroContext, ProjectInput
+from core.data_model import (PortfolioSettings, MacroContext, ProjectInput,
+                             projects_from_upload)
 from core.financial_engine import (
     project_cash_flows, tornado_scan, sensitivity_scan, build_scenarios,
     sensitivity_summary, stress_case,
@@ -31,6 +34,7 @@ from core.risk_engine import (
 )
 from core.ai_explainer import (
     build_explanation, explain_metric, explain_graph, card_markdown,
+    build_executive_briefing,
 )
 from core.portfolio_optimizer import (
     optimize_portfolio, budget_sensitivity, efficient_frontier, build_project_table,
@@ -39,10 +43,14 @@ from core.optional_pricing import bs_call, bs_put
 from core.tts_speech import text_to_speech, speech_button_html
 from core.report_builder import build_report_files
 from core.email_delivery import validate_email, mask_email, send_report_email
+from core.vision_2030 import (
+    project_alignment, alignment_html, alignment_markdown, VISION_2030_TITLE,
+    NDS2_PILLAR,
+)
 
 try:
     st.set_page_config(
-        page_title="CapEx AI Agent - Zimbabwe",
+        page_title="Vision 2030 CapEx AI Agent - Zimbabwe",
         page_icon=":bar_chart:",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -108,6 +116,32 @@ div[data-testid="stSelectbox"]>div, div[data-testid="stSlider"] {
 .chip-red   { background:#ff6b6b22; color:#ff6b6b; border:1px solid #ff6b6b55; }
 .chip-gold  { background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d55; }
 hr.divider { border:none; border-top:1px solid #2e8bff33; margin:14px 0; }
+/* critical (RED triangle) travelling light - ~5 seconds around the frame */
+.cr-frame { position:fixed; inset:0; pointer-events:none; z-index:999998; animation:crDone .5s ease 5s forwards; }
+.cr-beam { position:fixed; background:#ff3b3b; opacity:0; pointer-events:none; z-index:999999; box-shadow:0 0 14px 5px #ff3b3b99; }
+.cr-t { top:0; height:5px; animation:crT 5s ease 1; }
+@keyframes crT { 0%{left:-40vw;opacity:0} 4%{opacity:1} 22%{opacity:1} 25%{opacity:0} 100%{left:105vw;opacity:0} }
+.cr-r { right:0; width:5px; animation:crR 5s ease 1; }
+@keyframes crR { 25%{top:-40vh;opacity:0} 29%{opacity:1} 47%{opacity:1} 50%{opacity:0} 100%{top:105vh;opacity:0} }
+.cr-b { bottom:0; height:5px; animation:crB 5s ease 1; }
+@keyframes crB { 50%{right:-40vw;opacity:0} 54%{opacity:1} 72%{opacity:1} 75%{opacity:0} 100%{right:105vw;opacity:0} }
+.cr-l { left:0; width:5px; animation:crL 5s ease 1; }
+@keyframes crL { 75%{bottom:-40vh;opacity:0} 79%{opacity:1} 97%{opacity:1} 100%{bottom:105vh;opacity:0} }
+@keyframes crDone { to{opacity:0;} }
+.cr-banner {
+  background:#ff3b3b1a; border:1px solid #ff3b3b88; border-left:5px solid #ff3b3b;
+  color:#ffd2d2; border-radius:10px; padding:12px 16px; font-weight:700;
+  letter-spacing:.4px; margin:6px 0 10px 0;
+}
+.cr-banner-pulse { animation:crBanner 1.6s ease-in-out infinite; }
+@keyframes crBanner { 0%,100%{box-shadow:0 0 0 0 #ff3b3b44;} 50%{box-shadow:0 0 0 12px #ff3b3b00;} }
+/* demo mode strip */
+.demo-strip {
+  background:#112240; border:1px solid #fcd34d66; border-left:5px solid #fcd34d;
+  border-radius:12px; padding:14px 18px; margin:6px 0 12px 0; color:#e6f1ff;
+}
+.demo-chip { display:inline-block; padding:2px 10px; border-radius:20px; font-size:.78rem;
+  background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d55; font-weight:600; }
 </style>
 """
 st.markdown(_CSS, unsafe_allow_html=True)
@@ -138,6 +172,11 @@ def _init_state() -> None:
     })
     S.setdefault("last_email", "")
     S.setdefault("email_sent_msg", "")
+    S.setdefault("demo_mode", False)
+    S.setdefault("demo_step", 0)
+    S.setdefault("nav_target", None)
+    S.setdefault("role", "banking")
+    S.setdefault("report_ready", False)
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +365,166 @@ def chapter_heading(text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Navigation options (single source for the sidebar radio + DEMO MODE)
+# ---------------------------------------------------------------------------
+PAGE_OPTIONS = ["ðŸ  Dashboard", "ðŸŒ Zimbabwe Macro Monitor",
+                "ðŸ“‹ Project Input", "ðŸ’° Cash Flow",
+                "ðŸ¦ Capital Budgeting", "ðŸ›¡ï¸ Risk & ML",
+                "ðŸ§ª Stress Testing", "ðŸ”„ Scenario Analysis",
+                "ðŸŽ¯ Sensitivity Analysis", "ðŸ“¦ Portfolio Optimization",
+                "ðŸ¤– AI Explanation", "ðŸ¤– AI Robot",
+                "ðŸ”Ž Data Sources", "âš™ï¸ Settings", "ðŸ“„ Final Report"]
+
+
+def page_option(name: str) -> str:
+    """Map a plain page name (e.g. 'Stress Testing') to its sidebar option."""
+    for opt in PAGE_OPTIONS:
+        if opt.endswith(name):
+            return opt
+    return PAGE_OPTIONS[0]
+
+
+SECTORS = ["roads", "energy", "mining", "manufacturing", "water",
+           "agriculture", "aviation", "education", "other"]
+
+
+# ---------------------------------------------------------------------------
+# DEMO MODE - guided 16-step demonstration journey
+# ---------------------------------------------------------------------------
+DEMO_STEPS = [
+    ("Load project", "Dashboard",
+     "Loaded the SYNTHETIC GZU Innovation Hub - Mashava Campus demonstration project."),
+    ("Live macro data", "Zimbabwe Macro Monitor",
+     "Zimbabwe's latest available inflation, policy, lending and ZiG/USD indicators now drive the model - never decoration."),
+    ("Explain NPV", "Capital Budgeting",
+     "First the concept: NPV estimates the value created after the time value of money. Explanation always comes before the number."),
+    ("Show NPV result", "Dashboard",
+     "The dashboard shows the computed NPV, IRR, PI, payback and the geometric project status."),
+    ("Explain IRR", "AI Explanation",
+     "IRR is the discount rate at which NPV equals zero - explained before the result is shown."),
+    ("Show IRR", "Capital Budgeting",
+     "IRR and MIRR are displayed side-by-side against the WACC hurdle."),
+    ("Explain cost overrun", "Risk & ML",
+     "A cost overrun happens when the final cost exceeds the approved budget - the ML lab measures its probability."),
+    ("Show ML prediction", "Risk & ML",
+     "The model predicts cost-overrun probability, delay probability and expected magnitudes from project attributes."),
+    ("Open stress testing", "Stress Testing",
+     "Stress testing shocks inflation, FX, interest rates, materials, revenue and schedule all at once."),
+    ("Increase inflation", "Stress Testing",
+     "Move the inflation slider and watch NPV, IRR, MIRR, capex and payback recalculate instantly."),
+    ("Show charts changing", "Stress Testing",
+     "Every chart re-computes from the same shared cash-flow table - Base versus Stress side by side."),
+    ("Increase FX stress", "Stress Testing",
+     "ZiG depreciation raises imported-equipment cost because part of the capex is hard currency."),
+    ("Show risk status changing", "Stress Testing",
+     "The geometric status (green hexagon / amber diamond / red triangle) responds to the stressed thresholds."),
+    ("AI robot explains", "AI Robot",
+     "The AI financial analyst narrates every result in plain language with Start, Pause, Resume, Stop, Mute and Restart."),
+    ("Generate report", "Final Report",
+     "Generate the Board management report, view it in-app, and download the PDF."),
+    ("Email + audio", "Final Report",
+     "Send the report to the submitter e-mail and play or download the executive audio briefing."),
+]
+
+
+def render_demo_strip() -> None:
+    """Render the DEMO MODE overlay banner (on every page while active)."""
+    S = st.session_state
+    step = S["demo_step"]
+    label, target, text = DEMO_STEPS[min(step, len(DEMO_STEPS) - 1)]
+    with st.container():
+        st.markdown(
+            '<div class="demo-strip"><span class="demo-chip">DEMO MODE</span>'
+            " <b>Step %d/%d - %s</b><br><span style='color:#b9c8e3;'>%s</span></div>"
+            % (step + 1, len(DEMO_STEPS), label, text), unsafe_allow_html=True)
+        c1, c2, c3, c4 = st.columns([1, 1, 1, 3])
+        if c1.button("NEXT STEP >>", use_container_width=True):
+            nxt = min(step + 1, len(DEMO_STEPS) - 1)
+            S["demo_step"] = nxt
+            S["nav_target"] = page_option(DEMO_STEPS[nxt][1])
+            st.rerun()
+        if c2.button("<< PREV STEP", use_container_width=True):
+            prv = max(step - 1, 0)
+            S["demo_step"] = prv
+            S["nav_target"] = page_option(DEMO_STEPS[prv][1])
+            st.rerun()
+        if c3.button("EXIT DEMO", use_container_width=True):
+            S["demo_mode"] = False
+            S["demo_step"] = 0
+            S["nav_target"] = None
+            st.rerun()
+
+
+def start_demo_mode() -> None:
+    """Start the guided demo with the GZU synthetic project preloaded (A-Z)."""
+    S = st.session_state
+    S["demo_mode"] = True
+    S["demo_step"] = 0
+    demo = S.get("demo_projects") or _load_demo_projects()
+    S["demo_projects"] = demo
+    gzu = next((d for d in demo if d.project_id == "GZU-HUB-001"), None)
+    if gzu is not None:
+        S["project"] = gzu
+    elif demo:
+        S["project"] = demo[0]
+    S["nav_target"] = page_option("Dashboard")
+    S["mode"] = "AI GUIDED MODE"
+    st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# User role -> focus wording (used in the dashboard AI insight)
+# ---------------------------------------------------------------------------
+ROLE_FOCUS = {
+    "banking": "Banking focus: repayment capacity, DSCR-style cash generation, credit and interest-rate risk.",
+    "government": "Government focus: public investment cost, budget requirement, procurement and implementation risk.",
+    "development_finance": "Development-finance focus: viability, funding structure, scenarios and development impact.",
+    "corporate": "Corporate focus: capital allocation, expansion, equipment and infrastructure payback.",
+    "investor": "Investor focus: returns - NPV, IRR, MIRR, PI and the downside under stress.",
+    "contractor": "Contractor focus: construction cost, materials, procurement, schedule, delays and cost overruns.",
+    "consultant": "Consultant focus: feasibility, valuation, due diligence, scenarios and transparent assumptions.",
+    "education": "Education focus: institutional capital projects (campuses, hubs, labs) and budget sustainability.",
+}
+
+
+def role_focus(role_key: str) -> str:
+    r = ROLE_FOCUS.get(role_key, "")
+    if r:
+        return r
+    return ROLE_FOCUS["banking"]
+
+
+# ---------------------------------------------------------------------------
+# Critical (RED triangle) travelling alert
+# ---------------------------------------------------------------------------
+def critical_alert_html(status: Dict[str, str]) -> str:
+    reasons = status.get("reasons", "")
+    banner = ('<div class="cr-banner cr-banner-pulse">'
+              "CRITICAL - MANAGEMENT REVIEW REQUIRED"
+              "<br><span style='font-weight:400;font-size:.85rem;'>%s</span></div>"
+              % reasons)
+    frame = (
+        '<div class="cr-frame"><span class="cr-beam cr-t"></span>'
+        '<span class="cr-beam cr-r"></span><span class="cr-beam cr-b"></span>'
+        '<span class="cr-beam cr-l"></span></div>')
+    return frame + banner
+
+
+def render_critical_alert(result: Optional[Dict[str, Any]] = None) -> None:
+    if result is None:
+        result = st.session_state.get("result")
+    if not result:
+        return
+    try:
+        from core.risk_engine import classify_status
+        status = classify_status(result)
+    except Exception:
+        return
+    if status.get("shape") == "TRIANGLE":
+        st.markdown(critical_alert_html(status), unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
 # make_chart (shared plotly builder)
 # ---------------------------------------------------------------------------
 def make_chart(kind: str, data: Any, title: str) -> go.Figure:
@@ -454,10 +653,10 @@ GUIDED_STEPS = [
 ]
 
 
-def robot_avatar_html(emoji: str = "🤖") -> str:
+def robot_avatar_html(emoji: str = "ðŸ¤–") -> str:
     return ('<div style="display:flex;align-items:center;gap:16px;">'
             '<div class="robot-avatar">%s</div>'
-            '<div><div style="font-weight:700;color:#2e8bff;">CAPEX AI AGENT</div>'
+            '<div><div style="font-weight:700;color:#2e8bff;">VISION 2030 CAPEX AI</div>'
             '<div style="color:#8aa2c8;font-size:.85rem;">%s</div></div></div>'
             % (emoji, robot_status_text()))
 
@@ -472,22 +671,22 @@ def robot_status_text() -> str:
 def robot_controls() -> None:
     rb = st.session_state["robot"]
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    if c1.button("▶ START", use_container_width=True):
+    if c1.button("â–¶ START", use_container_width=True):
         rb.update(running=True, paused=False, step=0, state="RUNNING",
                   current=GUIDED_STEPS[0][1])
         st.rerun()
-    if c2.button("⏸ PAUSE", use_container_width=True):
+    if c2.button("â¸ PAUSE", use_container_width=True):
         rb.update(paused=True, state="PAUSED"); st.rerun()
-    if c3.button("▶ RESUME", use_container_width=True):
+    if c3.button("â–¶ RESUME", use_container_width=True):
         rb.update(paused=False, state="RUNNING"); st.rerun()
-    if c4.button("⏹ STOP", use_container_width=True):
+    if c4.button("â¹ STOP", use_container_width=True):
         rb.update(running=False, paused=False, state="STOPPED",
                   current="Standing by"); st.rerun()
-    if c5.button("🔊 MUTE" if not rb.get("muted") else "🔇 UNMUTE",
+    if c5.button("ðŸ”Š MUTE" if not rb.get("muted") else "ðŸ”‡ UNMUTE",
                  use_container_width=True):
         rb["muted"] = not rb.get("muted", False)
         st.rerun()
-    if c6.button("🔄 RESTART", use_container_width=True):
+    if c6.button("ðŸ”„ RESTART", use_container_width=True):
         rb.update(running=True, paused=False, step=0, state="RUNNING",
                   current=GUIDED_STEPS[0][1])
         st.rerun()
@@ -518,7 +717,7 @@ def render_robot_panel(page_name: str, explanation_text: str) -> None:
                 step_title, step_text = GUIDED_STEPS[rb["step"]]
                 robot_speak("<b>%s.</b> %s<br><span style='color:#8aa2c8;'>Current module: %s</span>"
                             % (step_title, step_text, page_name))
-                if st.button("▶ NEXT STEP", use_container_width=True):
+                if st.button("â–¶ NEXT STEP", use_container_width=True):
                     robot_step()
                     st.rerun()
             elif rb["paused"]:
@@ -531,14 +730,15 @@ def render_robot_panel(page_name: str, explanation_text: str) -> None:
 # Cinematic intro
 # ---------------------------------------------------------------------------
 INTRO_SLIDES = [
-    ("ZIMBABWE 🇿🇼", "Capital decisions begin with understanding the economic environment."),
+    ("ZIMBABWE ðŸ‡¿ðŸ‡¼", "Capital decisions begin with understanding the economic environment."),
     ("MACROECONOMIC INTELLIGENCE", "Inflation, interest rates, foreign exchange: the forces every project lives inside."),
     ("BANKING & PROJECT FINANCE", "Lending rates, cost of capital and debt structures priced for Zimbabwe."),
     ("PUBLIC INVESTMENT & INFRASTRUCTURE", "Roads, water, energy and the assets that carry a nation forward."),
     ("CAPITAL INVESTMENT", "Every dollar allocated must create measurable value."),
     ("PROJECT RISK INTELLIGENCE", "Cost overruns and delays - identified before they become crises."),
     ("ARTIFICIAL INTELLIGENCE", "Data becomes insight. Insight becomes action."),
-    ("CAPITAL PROJECTS FINANCE AI AGENT", "Explain. Analyse. Predict. Stress-Test."),
+    ("VISION 2030", "Every project measured against the national ambition: an upper-middle-income Zimbabwe by 2030."),
+    ("CAPITAL PROJECTS FINANCE AI AGENT", "Explain. Analyse. Predict. Stress-Test. Align to Vision 2030."),
 ]
 
 
@@ -555,7 +755,7 @@ def page_intro() -> None:
                 '<div style="font-size:3.4rem;font-weight:800;color:#2e8bff;letter-spacing:2px;">%s</div>'
                 '<div style="font-size:1.3rem;color:#e6f1ff;margin-top:26px;">%s</div>'
                 "</div>" % (title, quote), unsafe_allow_html=True)
-            nxt = "▶ Begin Demo" if step == len(INTRO_SLIDES) - 1 else "Next slide →"
+            nxt = "â–¶ Begin Demo" if step == len(INTRO_SLIDES) - 1 else "Next slide â†’"
             left, right = st.columns([3, 1])
             if right.button(nxt, use_container_width=True):
                 S["intro_step"] += 1
@@ -571,7 +771,7 @@ def page_intro() -> None:
                 '<div style="font-size:1.2rem;color:#8aa2c8;">Preparing your workspace</div>'
                 "</div>" % countdown, unsafe_allow_html=True)
             left, right = st.columns([3, 1])
-            if right.button("▶ Enter", use_container_width=True):
+            if right.button("â–¶ Enter", use_container_width=True):
                 S["intro_step"] += 1
                 st.rerun()
         else:
@@ -594,9 +794,11 @@ def page_login() -> None:
             '<div style="background:#112240;border:1px solid #2e8bff66;'
             'border-radius:18px;padding:38px 42px;margin-top:8vh;">'
             '<div style="text-align:center;font-size:1.6rem;font-weight:800;'
-            'color:#2e8bff;">CAPEX AI AGENT</div>'
+            'color:#2e8bff;">VISION 2030 CAPEX AI AGENT</div>'
             '<div style="text-align:center;color:#8aa2c8;margin-bottom:22px;">'
-            "Zimbabwe Capital Projects Finance Intelligence Platform</div>"
+            "Zimbabwe Capital Projects Finance Intelligence Platform - every "
+            "project aligned to the National Development Goals on the road to "
+            "an upper-middle-income Zimbabwe by 2030.</div>"
             "</div>", unsafe_allow_html=True)
         user = st.text_input("Username")
         pw = st.text_input("Password", type="password")
@@ -616,29 +818,74 @@ def page_login() -> None:
 # Welcome
 # ---------------------------------------------------------------------------
 def page_welcome() -> None:
-    st.markdown("## Welcome, System Administrator")
+    user = st.session_state.get("user") or "System Administrator"
+    st.markdown("## Welcome, %s" % user)
     st.markdown(
-        "You are now connected to the Capital Projects Finance AI Agent - "
-        "Zimbabwe's project finance intelligence workspace. Every number below "
-        "is recalculated from one shared cash-flow table the moment any input changes.")
+        '<div style="background:linear-gradient(135deg,#112240,#0d1b32);'
+        'border-left:4px solid #fcd34d;border-radius:10px;padding:12px 18px;'
+        'color:#e6f1ff;">%s - <b>%s</b><br>'
+        '<span style="color:#8aa2c8;font-size:.9rem;">Every project below is '
+        "also scored for alignment with Vision 2030 National Development Goals "
+        "on the Dashboard and in the Final Report.</span></div>"
+        % (VISION_2030_TITLE, NDS2_PILLAR), unsafe_allow_html=True)
+    macro = st.session_state.get("macro")
+    macro_note = ""
+    if macro is not None:
+        macro_note = (
+            " Zimbabwe's latest available macroeconomic indicators (inflation "
+            "%.1f%%, policy rate %.1f%%, lending rate %.1f%%, %s), "
+            "capital-budgeting analytics, project-risk models and stress-testing "
+            "tools are ready."
+            % (macro.inflation_pct(), macro.policy_rate_pct(),
+               macro.lending_rate_pct(), fx_display(macro)))
+    st.markdown(
+        "You are now connected to the Vision 2030 Capital Projects Finance "
+        "AI Agent." + macro_note +
+        " Every number below is recalculated from one shared cash-flow table "
+        "the moment any input or macroeconomic value changes.")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🤖 AI GUIDED MODE", use_container_width=True):
+        if st.button("AI GUIDED MODE", use_container_width=True):
             st.session_state["mode"] = "AI GUIDED MODE"
             st.rerun()
         st.markdown("Guided flow with the robot explaining every step end-to-end.")
     with c2:
-        if st.button("👤 MANUAL MODE", use_container_width=True):
+        if st.button("MANUAL MODE", use_container_width=True):
             st.session_state["mode"] = "MANUAL MODE"
             st.rerun()
         st.markdown("Pick any module from the sidebar and explore freely.")
+    st.markdown("### Start instantly with a demonstration project")
+    c1, c2, c3, c4 = st.columns(4)
+    if c1.button("GZU Innovation Hub (SYNTHETIC)", use_container_width=True):
+        demo = st.session_state.get("demo_projects") or _load_demo_projects()
+        st.session_state["demo_projects"] = demo
+        gzu = next((d for d in demo if d.project_id == "GZU-HUB-001"), demo[0])
+        st.session_state["project"] = gzu
+        st.session_state["mode"] = "AI GUIDED MODE"
+        st.success("Loaded the SYNTHETIC GZU Innovation Hub - Mashava Campus "
+                   "demonstration project, clearly labelled as demo data.")
+        st.rerun()
+    if c2.button("Road Demo", use_container_width=True):
+        demo = st.session_state.get("demo_projects") or _load_demo_projects()
+        st.session_state["demo_projects"] = demo
+        st.session_state["project"] = demo[0]
+        st.rerun()
+    if c3.button("Solar Demo", use_container_width=True):
+        demo = st.session_state.get("demo_projects") or _load_demo_projects()
+        st.session_state["demo_projects"] = demo
+        st.session_state["project"] = demo[1]
+        st.rerun()
+    if c4.button("DEMO MODE (guided tour)", use_container_width=True):
+        start_demo_mode()
+    st.caption("All demonstration projects are SYNTHETIC data - never "
+               "presented as real Zimbabwe projects or official statistics.")
 
 
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
 def _load_demo_projects() -> List[ProjectInput]:
-    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base = os.path.dirname(os.path.abspath(__file__))
     csv_path = os.path.join(base, "data", "demo_projects.csv")
     df = pd.read_csv(csv_path, comment="#")
     projects = []
@@ -652,7 +899,7 @@ def _load_demo_projects() -> List[ProjectInput]:
 
 
 def page_dashboard() -> None:
-    chapter_heading("ℹ️ Dashboard - Live Project Pulse")
+    chapter_heading("â„¹ï¸ Dashboard - Live Project Pulse")
     p = st.session_state["project"]
     r = compute(p)
     macro = st.session_state["macro"]
@@ -673,6 +920,21 @@ def page_dashboard() -> None:
     st.markdown("**Macro:** inflation %s | policy %s | lending %s | %s" % (
         pct(macro.inflation_pct()), pct(macro.policy_rate_pct()),
         pct(macro.lending_rate_pct()), fx_display(macro)))
+    st.markdown("#### AI INSIGHT")
+    st.info("The project currently shows %s projected value under the base "
+            "assumptions (%s). However, its results are sensitive to inflation "
+            "and exchange-rate changes. Stress testing should be performed "
+            "before the final investment decision."
+            % ("positive" if r["npv"] >= 0 else "negative", usd(r["npv"])))
+    st.caption(role_focus(st.session_state.get("role", "banking")))
+    st.markdown("#### %s alignment" % VISION_2030_TITLE)
+    al = project_alignment(p)
+    st.markdown(alignment_html(al), unsafe_allow_html=True)
+    with st.expander("How this alignment is derived"):
+        st.markdown(alignment_markdown(al))
+        st.caption("Alignment scores are deterministic AI judgement based on "
+                   "the project sector and type. They are decision-support "
+                   "estimates, not an official government endorsement.")
     ex = build_explanation(p, macro, r)
     explain_block(ex["plain"], "AI EXPLAINS THIS DASHBOARD")
     exg = explain_graph("NPV profile", {"npv_at_wacc": r["npv"]})
@@ -680,9 +942,9 @@ def page_dashboard() -> None:
 
 
 def page_macro_monitor() -> None:
-    chapter_heading("🌍 Zimbabwe Macro Monitor")
+    chapter_heading("ðŸŒ Zimbabwe Macro Monitor")
     st.caption("Live indicators with transparent source / date / status. "
-               "Press ctrl+F5 style refresh or restart the app to re-fetch.")
+               "Use the Settings page (or restart the app) to re-fetch.")
     macro = cached_macro()
     st.session_state["macro"] = macro
     cards = [
@@ -696,17 +958,30 @@ def page_macro_monitor() -> None:
     c = st.columns(3)
     for i, (label, val, unit, key) in enumerate(cards):
         raw = (macro.get("raw") or {}).get(key, {})
-        status = raw.get("status", "?")
+        if not isinstance(raw, dict):
+            raw = {}
+        status = raw.get("status", "unavailable")
         src = raw.get("source", "-")
+        obs = raw.get("observation_date") or "n/a"
+        sts = raw.get("retrieved_at") or "n/a"
+        flag = ""
+        if status in ("fallback_estimate", "unavailable"):
+            flag = " - DATA SOURCE TEMPORARILY UNAVAILABLE"
         with c[i % 3]:
             st.metric(label, "{:,.1f} {}".format(val, unit), status)
-            st.caption("Source: %s" % src)
+            st.caption("Source: %s%s" % (src, flag))
+            st.caption("Observed: %s | Retrieved: %s" % (obs, sts))
+    st.markdown("**LAST UPDATED:** %s" % (macro.fetched_at or "n/a"))
+    st.caption("Status legend: `live` = OpenAPI fetch succeeded; `live_proxy` = "
+               "clearly-labelled proxy series; `fallback_estimate` = labelled "
+               "default used because the source was unreachable. Values are "
+               "never disguised as official Zimbabwe statistics.")
     ex = explain_graph("Macro Monitor", {"main_driver": "inflation_pct"})
     explain_block(ex, "AI EXPLAINS MACRO MONITOR")
 
 
 def page_project_input() -> None:
-    chapter_heading("📋 Project Input")
+    chapter_heading("ðŸ“‹ Project Input")
     p = st.session_state["project"]
     st.caption("Every field drives the single shared cash-flow table. "
                "Change anything and every page recomputes.")
@@ -715,21 +990,17 @@ def page_project_input() -> None:
         with c1:
             pid = st.text_input("Project ID", value=p.project_id)
             name = st.text_input("Project name", value=p.project_name)
-            sector = st.selectbox("Sector", ["roads", "energy", "mining",
-                                             "manufacturing", "water",
-                                             "agriculture", "aviation", "other"],
-                                  index=(["roads", "energy", "mining", "manufacturing",
-                                          "water", "agriculture", "aviation", "other"]
-                                         .index(p.sector) if p.sector in
-                                         ["roads", "energy", "mining", "manufacturing",
-                                          "water", "agriculture", "aviation", "other"] else 0))
+            sector = st.selectbox("Sector", SECTORS,
+                                  index=SECTORS.index(p.sector)
+                                  if p.sector in SECTORS else 0)
             ptype = st.selectbox("Project type", ["infrastructure", "industrial",
-                                                  "extractive", "commercial"],
+                                                  "extractive", "commercial",
+                                                  "education"],
                                  index=(["infrastructure", "industrial",
-                                         "extractive", "commercial"]
+                                         "extractive", "commercial", "education"]
                                         .index(p.project_type) if p.project_type in
                                         ["infrastructure", "industrial", "extractive",
-                                         "commercial"] else 0))
+                                         "commercial", "education"] else 0))
             province = st.text_input("Province", value=p.province)
             cur = st.selectbox("Currency", ["USD", "ZiG"],
                                index=0 if p.currency == "USD" else 1)
@@ -800,32 +1071,95 @@ def page_project_input() -> None:
                                           "development_finance", "concessionaire",
                                           "government", "private_enterprise"] else 0))
 
+        st.markdown("##### Submitter")
+        c1, c2 = st.columns(2)
+        email = c1.text_input("Submitter e-mail (required - the final report "
+                              "is delivered here)", value=p.submitter_email or "")
+        c2.markdown("_The address belongs to the person submitting the project "
+                    "information and is used only to e-mail the final report._")
+
         submitted = st.form_submit_button("Apply project changes", use_container_width=True)
+        errors = []
+        if not pid.strip():
+            errors.append("Project ID is missing.")
+        if not name.strip():
+            errors.append("Project name is missing.")
+        if email.strip() and not validate_email(email):
+            errors.append("Submitter email is invalid.")
+        if life <= 0:
+            errors.append("Project duration must be greater than zero.")
         if submitted:
-            st.session_state["project"] = ProjectInput(
-                project_id=pid, project_name=name, sector=sector, project_type=ptype,
-                province=province, currency=cur, initial_investment=inv,
-                imported_equipment_pct=imported, contingency_pct=cont,
-                salvage_value_pct=salvage, construction_months=months,
-                project_life=life, annual_revenue=rev, revenue_growth_pct=rev_g,
-                operating_costs=opex, operating_cost_growth_pct=opex_g,
-                working_capital_pct=wc, terminal_growth_pct=term_g,
-                debt_ratio_pct=debt, debt_interest_pct=debt_i, equity_cost_pct=eq,
-                wacc_pct=wacc_o, reinvestment_rate_pct=reinvest, tax_rate_pct=tax,
-                complexity_score=comp, design_completeness=design,
-                procurement_delay_days=delay, num_change_orders=change,
-                contractor_type=ctype, funding_source=funding)
-            st.rerun()
-    if st.button("Load SYNTHETIC demo projects", use_container_width=True):
+            if errors:
+                for e in errors:
+                    st.error(e)
+            else:
+                st.session_state["project"] = ProjectInput(
+                    project_id=pid, project_name=name, sector=sector, project_type=ptype,
+                    province=province, currency=cur, initial_investment=inv,
+                    imported_equipment_pct=imported, contingency_pct=cont,
+                    salvage_value_pct=salvage, construction_months=months,
+                    project_life=life, annual_revenue=rev, revenue_growth_pct=rev_g,
+                    operating_costs=opex, operating_cost_growth_pct=opex_g,
+                    working_capital_pct=wc, terminal_growth_pct=term_g,
+                    debt_ratio_pct=debt, debt_interest_pct=debt_i, equity_cost_pct=eq,
+                    wacc_pct=wacc_o, reinvestment_rate_pct=reinvest, tax_rate_pct=tax,
+                    complexity_score=comp, design_completeness=design,
+                    procurement_delay_days=delay, num_change_orders=change,
+                    contractor_type=ctype, funding_source=funding,
+                    submitter_email=email.strip())
+                st.session_state["last_email"] = email.strip()
+                st.rerun()
+
+    st.markdown("### Option B - upload project file (Excel / CSV)")
+    st.caption("Upload a CSV (or Excel) file with columns named after the "
+               "project fields. Missing optional columns are ignored; required "
+               "ones report a clear error.")
+    up = st.file_uploader("Choose a CSV or Excel project file", type=["csv", "xlsx"])
+    if up is not None:
+        try:
+            if up.name.lower().endswith(".xlsx"):
+                dfu = pd.read_excel(up)
+            else:
+                dfu = pd.read_csv(up)
+            if dfu.shape[0] < 1:
+                st.error("Uploaded file contains no project rows.")
+            else:
+                upload_projects, upload_errors = projects_from_upload(dfu)
+                if upload_errors:
+                    for e in upload_errors:
+                        st.error(e)
+                if upload_projects:
+                    st.session_state["demo_projects"] = upload_projects
+                    st.session_state["project"] = upload_projects[0]
+                    st.success("Loaded %d project(s) from the uploaded file. "
+                               "Applied project: %s."
+                               % (len(upload_projects),
+                                  upload_projects[0].project_name))
+        except Exception as e:  # noqa: BLE001
+            st.error("Could not read the uploaded file: %s" % e)
+
+    st.markdown("### SYNTHETIC DEMO LOADER")
+    c1, c2, c3 = st.columns(3)
+    if c1.button("Load GZU Innovation Hub demo (SYNTHETIC)", use_container_width=True):
+        demo = _load_demo_projects()
+        st.session_state["demo_projects"] = demo
+        gzu = next((d for d in demo if d.project_id == "GZU-HUB-001"), demo[0])
+        st.session_state["project"] = gzu
+        st.success("Loaded SYNTHETIC demonstration project: %s" % gzu.project_name)
+        st.rerun()
+    if c2.button("Load all SYNTHETIC demo projects", use_container_width=True):
         demo = _load_demo_projects()
         st.session_state["demo_projects"] = demo
         st.session_state["project"] = demo[0]
-        st.success("Loaded 6 demonstration projects (synthetic data). Reloaded project 1.")
+        st.success("Loaded %d demonstration projects (synthetic data). "
+                   "Applied project 1: %s." % (len(demo), demo[0].project_name))
         st.rerun()
+    if c3.button("Start DEMO MODE tour", use_container_width=True):
+        start_demo_mode()
 
 
 def page_cash_flow() -> None:
-    chapter_heading("💰 Cash Flow Projection")
+    chapter_heading("ðŸ’° Cash Flow Projection")
     p = st.session_state["project"]
     r = compute(p)
     df = r["cash_flow_table"]
@@ -859,7 +1193,7 @@ def page_cash_flow() -> None:
 
 
 def page_capital_budgeting() -> None:
-    chapter_heading("🏦 Capital Budgeting")
+    chapter_heading("ðŸ¦ Capital Budgeting")
     p = st.session_state["project"]
     r = compute(p)
     metrics = [
@@ -902,16 +1236,16 @@ def page_capital_budgeting() -> None:
 
 
 def page_risk_ml() -> None:
-    chapter_heading("🛡️ Risk and Machine Learning")
+    chapter_heading("ðŸ›¡ï¸ Risk and Machine Learning")
     p = st.session_state["project"]
     r = compute(p)
     status = classify_status(r)
     st.markdown(status_line(status), unsafe_allow_html=True)
     with st.container(border=True):
         st.markdown("**Transparent classifier rules** (never a black box):")
-        st.markdown("• RED triangle  = NPV < 0 OR IRR < WACC OR PI < 1")
-        st.markdown("• AMBER diamond = NPV > 0 but payback > 70% of life OR PI < 1.25 OR +10pt inflation flips NPV")
-        st.markdown("• GREEN hexagon = otherwise (stable and resilient)")
+        st.markdown("â€¢ RED triangle  = NPV < 0 OR IRR < WACC OR PI < 1")
+        st.markdown("â€¢ AMBER diamond = NPV > 0 but payback > 70% of life OR PI < 1.25 OR +10pt inflation flips NPV")
+        st.markdown("â€¢ GREEN hexagon = otherwise (stable and resilient)")
         st.caption("Triggered reasons: " + status["reasons"])
 
     st.markdown("### Monte-Carlo NPV (2000 correlated macro draws)")
@@ -969,8 +1303,10 @@ def page_risk_ml() -> None:
         "contractor_type_code": ["local_large", "international", "local_small",
                                  "mixed"].index(p.contractor_type) if p.contractor_type in
                                 ["local_large", "international", "local_small", "mixed"] else 0,
-        "sector_code": ["roads", "energy", "mining", "manufacturing", "water"].
-        index(p.sector) if p.sector in ["roads", "energy", "mining", "manufacturing", "water"] else 0,
+        "sector_code": ["roads", "energy", "mining", "manufacturing", "water",
+                        "education", "agriculture", "aviation"].
+        index(p.sector) if p.sector in ["roads", "energy", "mining", "manufacturing",
+                                        "water", "education", "agriculture", "aviation"] else 0,
     }])[ml["feature_names"]]
     overrun_prob = float(ml["model"].predict_proba(Xproj)[0, 1])
     delay_prob = min(0.05 + overrun_prob * 0.85 + p.procurement_delay_days / 1600, 0.95)
@@ -987,7 +1323,7 @@ def page_risk_ml() -> None:
 
 
 def page_stress_testing() -> None:
-    chapter_heading("🧪 Macro Stress Test Lab")
+    chapter_heading("ðŸ§ª Macro Stress Test Lab")
     p = st.session_state["project"]
     st.caption("Slide each macro driver; the ENTIRE project recomputes and "
                "every chart updates, comparing Base vs Stress.")
@@ -1059,7 +1395,7 @@ def page_stress_testing() -> None:
 
 
 def page_scenario_analysis() -> None:
-    chapter_heading("🔄 Scenario Analysis")
+    chapter_heading("ðŸ”„ Scenario Analysis")
     p = st.session_state["project"]
     df = build_scenarios(p)
     show_chart(make_chart("scenario", df, "Scenario NPV Comparison"))
@@ -1078,7 +1414,7 @@ def page_scenario_analysis() -> None:
 
 
 def page_sensitivity_analysis() -> None:
-    chapter_heading("🎯 Sensitivity Analysis")
+    chapter_heading("ðŸŽ¯ Sensitivity Analysis")
     p = st.session_state["project"]
     to = tornado_scan(p)
     show_chart(make_chart("tornado", to, "Tornado - One Driver at a Time"))
@@ -1102,7 +1438,7 @@ def page_sensitivity_analysis() -> None:
 
 
 def page_portfolio_optimization() -> None:
-    chapter_heading("📦 Portfolio Optimization (MILP)")
+    chapter_heading("ðŸ“¦ Portfolio Optimization (MILP)")
     st.caption("PuLP + CBC integer programming selects the budget-maximising "
                "set of projects. Demo portfolio = SYNTHETIC Zimbabwe projects.")
     demo = st.session_state.get("demo_projects") or _load_demo_projects()
@@ -1145,7 +1481,7 @@ def page_portfolio_optimization() -> None:
 
 
 def page_ai_explanation() -> None:
-    chapter_heading("🤖 AI Explanation Center")
+    chapter_heading("ðŸ¤– AI Explanation Center")
     p = st.session_state["project"]
     r = compute(p)
     macro = st.session_state["macro"]
@@ -1171,7 +1507,7 @@ def page_ai_explanation() -> None:
 
 
 def page_ai_robot() -> None:
-    chapter_heading("🤖 AI Robot")
+    chapter_heading("ðŸ¤– AI Robot")
     st.markdown("### Guided walk-through of the whole analysis")
     render_robot_panel("AI Robot", "I explain every module: project info, "
                                     "concept, calculation, result, meaning, "
@@ -1213,7 +1549,7 @@ def page_ai_robot() -> None:
 
 
 def page_data_sources() -> None:
-    chapter_heading("🔎 Data Sources")
+    chapter_heading("ðŸ”Ž Data Sources")
     st.caption("Full transparency: Variable | Source | Observation Date | "
                "Retrieved Date | Value | Unit | Status | How it integrates")
     macro = st.session_state["macro"]
@@ -1260,24 +1596,33 @@ def page_data_sources() -> None:
 
 
 def page_settings() -> None:
-    chapter_heading("⚙️ Settings")
+    chapter_heading("âš™ï¸ Settings")
     macro = cached_macro()
     st.session_state["macro"] = macro
-    if st.button("🔄 Refresh live macro data (re-fetch)", use_container_width=True):
+    if st.button("ðŸ”„ Refresh live macro data (re-fetch)", use_container_width=True):
         build_macro_context(refresh=True)
         st.cache_data.clear()
         st.rerun()
+    st.markdown("### User profile (adjusts the AI insight focus)")
+    role = st.selectbox(
+        "Your role", sorted(ROLE_FOCUS.keys()),
+        index=sorted(ROLE_FOCUS.keys()).index(st.session_state.get("role", "banking"))
+        if st.session_state.get("role", "banking") in ROLE_FOCUS else 0)
+    if role != st.session_state.get("role"):
+        st.session_state["role"] = role
+        st.rerun()
+    st.markdown("_%s_" % role_focus(role))
     st.markdown("### Default model behaviour")
-    st.markdown("• WACC 0 = auto from macro (policy rate, country risk, "
+    st.markdown("â€¢ WACC 0 = auto from macro (policy rate, country risk, "
                 "complexity premium, lending rate after tax).")
-    st.markdown("• Operating-cost growth default 30% reflects Zimbabwe cost "
+    st.markdown("â€¢ Operating-cost growth default 30% reflects Zimbabwe cost "
                 "escalation; change per project.")
-    st.markdown("• Every metric derives from ONE shared cash-flow table - "
+    st.markdown("â€¢ Every metric derives from ONE shared cash-flow table - "
                 "no duplicated math anywhere.")
     st.markdown("### Environment")
     for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASS"):
         v = os.environ.get(k)
-        st.markdown("• `%s`: %s" % (k, "configured" if v else "not set"))
+        st.markdown("â€¢ `%s`: %s" % (k, "configured" if v else "not set"))
     st.caption("Credentials are read from environment variables or "
                "~/.streamlit/secrets.toml only; never hard-coded.")
     if st.button("Reset session state", use_container_width=True):
@@ -1288,70 +1633,98 @@ def page_settings() -> None:
 
 
 def page_final_report() -> None:
-    chapter_heading("📄 Final Report & Delivery")
+    chapter_heading("ðŸ“„ Final Report & Delivery")
     p = st.session_state["project"]
     r = compute(p)
     macro = st.session_state["macro"]
     st.caption("Generate the Board-ready PDF plus a plain-text variant, "
-               "listen to an AI narration, and e-mail the report.")
+               "view it in-app, listen to an executive audio briefing, "
+               "and e-mail the report to the project submitter.")
     sections_all = ["Executive Summary", "Zimbabwe Economic Environment",
                     "Live Macro Data", "Cash Flow", "Capital Budgeting",
                     "Risk and ML", "Stress Test", "Sensitivity", "Scenarios",
                     "AI Explanation", "Key Assumptions", "Data Limitations",
-                    "Final Findings"]
+                    "Vision 2030 Alignment", "Final Findings"]
     selected = st.multiselect("Sections to include", sections_all,
                               default=sections_all)
-    if st.button("📄 Generate report", use_container_width=True):
+    if st.button("ðŸ“„ Generate report", use_container_width=True):
         with st.spinner("Building report..."):
             files = build_report_files(p, macro, r, selected)
             st.session_state["report_pdf"] = files["pdf"]
             st.session_state["report_txt"] = files["txt"]
+            st.session_state["report_ready"] = True
         st.success("Report generated.")
     pdf_path = st.session_state.get("report_pdf")
     txt_path = st.session_state.get("report_txt")
     if pdf_path and os.path.exists(pdf_path):
         with open(pdf_path, "rb") as fh:
-            st.download_button("⬇ DOWNLOAD PDF",
+            st.download_button("â¬‡ DOWNLOAD PDF",
                                fh.read(), file_name=os.path.basename(pdf_path),
                                mime="application/pdf", use_container_width=True)
     if txt_path and os.path.exists(txt_path):
         with open(txt_path, "rb") as fh:
-            st.download_button("⬇ DOWNLOAD TEXT",
+            st.download_button("â¬‡ DOWNLOAD TEXT",
                                fh.read(), file_name=os.path.basename(txt_path),
                                mime="text/plain", use_container_width=True)
 
-    st.markdown("### 🎧 Audio narration")
+    if st.session_state.get("report_ready") and txt_path and os.path.exists(txt_path):
+        with open(txt_path, "r", encoding="utf-8") as fh:
+            report_text = fh.read()
+        with st.expander("VIEW REPORT", expanded=False):
+            st.text(report_text)
+        st.markdown("**Report file:** `%s`" % os.path.basename(txt_path))
+    else:
+        st.info("Generate the report first to enable VIEW REPORT.")
+
+    st.markdown("### ðŸŽ§ Executive audio briefing")
+    st.caption("This audio briefing uses the SAME final model results as the "
+               "report: project results, major risks, stress-test findings and "
+               "key management monitoring points.")
     ex = build_explanation(p, macro, r)
-    narrative = ex["narrative"]
-    st.markdown("#### ▶ PLAY AUDIO (browser speech)")
-    st.components.v1.html(speech_button_html(narrative, "final"), height=150)
-    if st.button("⬇ DOWNLOAD AUDIO (gTTS MP3)", use_container_width=True):
-        mp3 = text_to_speech(narrative)
+    briefing = build_executive_briefing(p, macro, r)
+    exec_briefing_text = briefing["briefing"]
+    st.markdown("#### â–¶ PLAY AUDIO (browser speech, executive briefing)")
+    st.components.v1.html(speech_button_html(exec_briefing_text, "exec"), height=150)
+    if st.button("â¬‡ DOWNLOAD AUDIO (gTTS MP3, executive briefing)",
+                 use_container_width=True):
+        mp3 = text_to_speech(exec_briefing_text)
         if mp3:
             st.session_state["audio_mp3"] = mp3
+            st.session_state["audio_name"] = "capex_ai_executive_briefing.mp3"
             st.success("Audio ready for download.")
         else:
             st.warning("gTTS unavailable (offline?). Use the browser player above.")
     if st.session_state.get("audio_mp3"):
-        st.download_button("⬇ SAVE AUDIO FILE", st.session_state["audio_mp3"],
-                           file_name="capex_ai_report.mp3", mime="audio/mpeg",
+        fname = st.session_state.get("audio_name", "capex_ai_report.mp3")
+        st.download_button("â¬‡ SAVE AUDIO FILE", st.session_state["audio_mp3"],
+                           file_name=fname, mime="audio/mpeg",
                            use_container_width=True)
+    with st.expander("AI EXPLAINS - executive briefing text"):
+        st.write(exec_briefing_text)
 
-    st.markdown("### ✉️ E-mail delivery")
+    st.markdown("### âœ‰ï¸ E-mail delivery")
     recipient_default = st.session_state.get("last_email") or p.submitter_email or ""
-    recipient = st.text_input("Recipient e-mail", value=recipient_default)
+    recipient = st.text_input("Recipient e-mail (project submitter)",
+                              value=recipient_default)
     subject = st.text_input("Subject", value="CapEx AI Agent - Management Report for %s" % p.project_id)
     if st.button("SEND FINAL REPORT", use_container_width=True):
         if not validate_email(recipient):
             st.error("Invalid e-mail address format.")
         else:
-            body = "Attached: %s management report.\nProject: %s (%s)" % (
-                p.project_name, p.project_id, p.sector)
+            body = ("Your capital project analysis has been completed. The Vision 2030 "
+                    "Capital Projects Finance AI Agent has generated the "
+                    "requested analysis report.\n\n"
+                    "Project: %s (%s) | Sector: %s\n"
+                    "NPV: %s | IRR: %s | Decision: %s" %
+                    (p.project_name, p.project_id, p.sector, usd(r["npv"]),
+                     rate(r["irr"]), r["decision"]))
             att = pdf_path if (pdf_path and os.path.exists(pdf_path)) else None
             res = send_report_email(recipient, subject, body, attachment_path=att)
             st.session_state["last_email"] = recipient
+            p.submitter_email = recipient
             if res["success"]:
-                st.success(res["message"] + " (recipient masked for privacy)")
+                st.success("\u2713 REPORT SENT SUCCESSFULLY to %s (recipient "
+                           "masked for privacy)" % mask_email(recipient))
             else:
                 st.error(res["message"])
 
@@ -1371,46 +1744,58 @@ def main() -> None:
     # ------------------------------------------------------------------ robot banner on every page
     with st.sidebar:
         st.markdown(robot_avatar_html(), unsafe_allow_html=True)
-        page = st.radio("Navigate",
-                        ["🏠 Dashboard", "🌍 Zimbabwe Macro Monitor",
-                         "📋 Project Input", "💰 Cash Flow",
-                         "🏦 Capital Budgeting", "🛡️ Risk & ML",
-                         "🧪 Stress Testing", "🔄 Scenario Analysis",
-                         "🎯 Sensitivity Analysis", "📦 Portfolio Optimization",
-                         "🤖 AI Explanation", "🤖 AI Robot",
-                         "🔎 Data Sources", "⚙️ Settings", "📄 Final Report"])
+        page = st.radio("Navigate", PAGE_OPTIONS)
         st.markdown('<hr class="divider">', unsafe_allow_html=True)
         st.markdown("**Mode:** %s" % st.session_state["mode"])
+        st.markdown("**Role:** %s (%s)" % (
+            role_focus(st.session_state.get("role", "banking")).split(":")[0],
+            st.session_state.get("role", "banking")))
+        if st.button("DEMO MODE (guided tour)", use_container_width=True):
+            start_demo_mode()
         if st.button("Sign out", use_container_width=True):
             st.session_state["authenticated"] = False
             st.session_state["intro_done"] = False
             st.session_state["intro_step"] = 0
+            st.session_state["demo_mode"] = False
             st.rerun()
 
+    # ------------------------------------------------- demo-mode navigation override
+    nav = st.session_state.get("nav_target")
+    if nav:
+        st.session_state["nav_target"] = None
+        page = nav
+
     pages = {
-        "🏠 Dashboard": page_dashboard,
-        "🌍 Zimbabwe Macro Monitor": page_macro_monitor,
-        "📋 Project Input": page_project_input,
-        "💰 Cash Flow": page_cash_flow,
-        "🏦 Capital Budgeting": page_capital_budgeting,
-        "🛡️ Risk & ML": page_risk_ml,
-        "🧪 Stress Testing": page_stress_testing,
-        "🔄 Scenario Analysis": page_scenario_analysis,
-        "🎯 Sensitivity Analysis": page_sensitivity_analysis,
-        "📦 Portfolio Optimization": page_portfolio_optimization,
-        "🤖 AI Explanation": page_ai_explanation,
-        "🤖 AI Robot": page_ai_robot,
-        "🔎 Data Sources": page_data_sources,
-        "⚙️ Settings": page_settings,
-        "📄 Final Report": page_final_report,
+        "ðŸ  Dashboard": page_dashboard,
+        "ðŸŒ Zimbabwe Macro Monitor": page_macro_monitor,
+        "ðŸ“‹ Project Input": page_project_input,
+        "ðŸ’° Cash Flow": page_cash_flow,
+        "ðŸ¦ Capital Budgeting": page_capital_budgeting,
+        "ðŸ›¡ï¸ Risk & ML": page_risk_ml,
+        "ðŸ§ª Stress Testing": page_stress_testing,
+        "ðŸ”„ Scenario Analysis": page_scenario_analysis,
+        "ðŸŽ¯ Sensitivity Analysis": page_sensitivity_analysis,
+        "ðŸ“¦ Portfolio Optimization": page_portfolio_optimization,
+        "ðŸ¤– AI Explanation": page_ai_explanation,
+        "ðŸ¤– AI Robot": page_ai_robot,
+        "ðŸ”Ž Data Sources": page_data_sources,
+        "âš™ï¸ Settings": page_settings,
+        "ðŸ“„ Final Report": page_final_report,
     }
+
+    # ---------------------------------------------- critical (RED) travelling alert
+    render_critical_alert()
+
+    # ---------------------------------------------------------- demo-mode strip
+    if st.session_state.get("demo_mode"):
+        render_demo_strip()
 
     # ---------------------------------------------------------- page scatter
     pages[page]()
 
     # ------------------------------------------------------------------ AI guided explainer strip
     if st.session_state["mode"] == "AI GUIDED MODE" and page not in (
-            "🤖 AI Robot", "📄 Final Report", "⚙️ Settings"):
+            "ðŸ¤– AI Robot", "ðŸ“„ Final Report", "âš™ï¸ Settings"):
         render_robot_panel(page_from_emoji(page), "I am following this module "
                              "with you. Press START to run the full guided "
                              "narrative or this module's explanation is above.")
