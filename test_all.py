@@ -1,4 +1,4 @@
-"""CapEx AI Agent - full test suite.
+﻿"""CapEx AI Agent - full test suite.
 
 Each `test_*` function returns bool (True = PASS). The `__main__` runner
 prints PASS/FAIL per test and exits with a non-zero code when anything fails,
@@ -421,8 +421,7 @@ def test_macro_context_methods():
 # GZU demo project (SYNTHETIC/DEMO DATA)
 # ===========================================================================
 def _load_gzu_demo() -> dm.ProjectInput:
-    from ui.app import _load_demo_projects
-    projects = _load_demo_projects()
+    projects = app._load_demo_projects()
     for p in projects:
         if p.project_id == "GZU-HUB-001":
             return p
@@ -433,7 +432,7 @@ def test_gzu_innovation_hub_demo():
     p = _load_gzu_demo()
     if p.project_id != "GZU-HUB-001":
         return False
-    if p.project_name != "GZU Innovation Hub — Masvingo Campus":
+    if p.project_name != "GZU Innovation Hub â€” Masvingo Campus":
         return False
     if p.sector != "education" or p.province != "Masvingo":
         return False
