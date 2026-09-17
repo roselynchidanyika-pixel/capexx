@@ -1,0 +1,36 @@
+# CapEx AI Agent - Python dependencies
+# Zimbabwe Capital Projects Finance Intelligence Platform
+# Python 3.10+ recommended
+
+# --- core platform ----------------------------------------------------------
+streamlit>=1.36
+pandas>=2.0
+numpy>=1.24
+
+# --- ML / risk --------------------------------------------------------------
+scikit-learn>=1.4
+xgboost>=2.0            # optional alternative learner for the ML lab
+scipy>=1.11
+
+# --- visualisation ----------------------------------------------------------
+plotly>=5.18
+
+# --- text to speech ---------------------------------------------------------
+gtts>=2.5.4
+# --- PDF reports ------------------------------------------------------------
+fpdf2>=2.7.8
+python-docx>=1.1        # optional MS Word export
+pypdf>=4.0              # optional PDF inspection
+reportlab>=4.0          # optional alternative PDF builder
+
+# --- portfolio optimisation (MILP) ------------------------------------------
+PuLP>=2.8
+
+# --- data access / config ---------------------------------------------------
+requests>=2.31
+python-dotenv>=1.0
+stqdm>=0.2.1            # optional progress bars (used by macro_engine)
+
+# --- tests ------------------------------------------------------------------
+pytest>=8.0             # optional; tests/ is also runnable standalone
+matplotlib>=3.8         # optional (plotly is the primary charting lib)

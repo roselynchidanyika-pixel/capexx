@@ -1,0 +1,10 @@
+# SAMPLE TEMPLATE - CapEx AI Agent project input
+# ---------------------------------------------------------------------------
+# Fill one row per project. Keep the column headers exactly as-is.
+# All figures are DEMONSTRATION defaults; replace them with your real data.
+# Monetary values are in USD. imported_equipment_pct = % of capex in hard
+# currency (0-100). complexity_score = 1..5. design_completeness = 0..1.
+# Add a # row above like this one to declare any real data provenance.
+# ---------------------------------------------------------------------------
+project_id,project_name,sector,project_type,currency,initial_investment,imported_equipment_pct,contingency_pct,salvage_value_pct,construction_months,project_life,annual_revenue,revenue_growth_pct,operating_costs,operating_cost_growth_pct,working_capital_pct,terminal_growth_pct,debt_ratio_pct,debt_interest_pct,equity_cost_pct,wacc_pct,reinvestment_rate_pct,tax_rate_pct,debt_tenor_years,complexity_score,design_completeness,procurement_delay_days,num_change_orders,contractor_type,funding_source,procurement_method,province,submitter_email,expected_completion,project_location,contractor_name,notes,remarks
+PROJ-0001,Your Project Name,roads,infrastructure,USD,10000000,40,10,10,24,10,4000000,5,2000000,30,10,2,60,18,0,0,5,25,8,3,0.60,60,3,local_large,mixed,open_competitive,Harare,you@example.com,2028-12-31,Project Location,Contractor Name,Free-form notes,Free-form remarks
